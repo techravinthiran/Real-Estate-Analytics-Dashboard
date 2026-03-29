@@ -54,15 +54,8 @@ secrets.json
 # Streamlit
 .streamlit/
 
-# Data files (keep templates, ignore actual data)
-*.csv
-!data/*.csv
-*.json
-!data/*.json
-
 # Jupyter
 .ipynb_checkpoints/
-*.ipynb
 
 # MySQL
 *.sql

@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from sqlalchemy import create_engine
 from urllib.parse import quote_plus
+import json
 
 # Page config
 st.set_page_config(
@@ -68,523 +69,244 @@ def run_query(query, engine):
         st.error(f"Query execution error: {e}")
         return pd.DataFrame()
 
-# 30 SQL Queries with their visualizations
-QUERIES = {
-    "Q1: Average Listing Price by City": {
-        "query": """
-        SELECT city,
-               ROUND(AVG(price), 2) AS avg_listing_price,
-               COUNT(*) AS total_listings
-        FROM listings
-        GROUP BY city
-        ORDER BY avg_listing_price DESC
-        """,
-        "chart_type": "bar",
-        "x": "city",
-        "y": "avg_listing_price",
-        "title": "Average Listing Price by City"
-    },
-    
-    "Q2: Average Price per Sq Ft by Property Type": {
-        "query": """
-        SELECT property_type,
-               ROUND(AVG(price / NULLIF(sqft, 0)), 2) AS avg_price_per_sqft
-        FROM listings
-        GROUP BY property_type
-        ORDER BY avg_price_per_sqft DESC
-        """,
-        "chart_type": "bar",
-        "x": "property_type", 
-        "y": "avg_price_per_sqft",
-        "title": "Average Price per Square Foot by Property Type"
-    },
-    
-    "Q3: Furnishing Status Impact on Price": {
-        "query": """
-        SELECT pa.furnishing_status,
-               ROUND(AVG(l.price), 2) AS avg_price,
-               COUNT(*) AS property_count
-        FROM listings l
-        JOIN property_attributes pa ON l.listing_id = pa.listing_id
-        GROUP BY pa.furnishing_status
-        ORDER BY avg_price DESC
-        """,
-        "chart_type": "bar",
-        "x": "furnishing_status",
-        "y": "avg_price", 
-        "title": "Furnishing Status Impact on Price"
-    },
-    
-    "Q4: Metro Distance vs Average Price": {
-        "query": """
-        SELECT
-            CASE
-                WHEN pa.metro_distance_km <= 2  THEN '0-2 km'
-                WHEN pa.metro_distance_km <= 5  THEN '2-5 km'
-                WHEN pa.metro_distance_km <= 10 THEN '5-10 km'
-                ELSE '10+ km'
-            END AS metro_distance_range,
-            ROUND(AVG(l.price), 2) AS avg_price,
-            COUNT(*) AS count
-        FROM listings l
-        JOIN property_attributes pa ON l.listing_id = pa.listing_id
-        GROUP BY metro_distance_range
-        ORDER BY avg_price DESC
-        """,
-        "chart_type": "bar",
-        "x": "metro_distance_range",
-        "y": "avg_price",
-        "title": "Metro Distance vs Average Price"
-    },
-    
-    "Q5: Rented vs Non-Rented Property Prices": {
-        "query": """
-        SELECT
-            CASE WHEN pa.is_rented = 1 THEN 'Rented' ELSE 'Not Rented' END AS rental_status,
-            ROUND(AVG(l.price), 2) AS avg_price,
-            COUNT(*) AS count
-        FROM listings l
-        JOIN property_attributes pa ON l.listing_id = pa.listing_id
-        GROUP BY rental_status
-        """,
-        "chart_type": "bar",
-        "x": "rental_status",
-        "y": "avg_price",
-        "title": "Rented vs Non-Rented Property Prices"
-    },
-    
-    "Q6: Bedrooms & Bathrooms Effect on Pricing": {
-        "query": """
-        SELECT pa.bedrooms,
-               pa.bathrooms,
-               ROUND(AVG(l.price), 2) AS avg_price,
-               COUNT(*) AS count
-        FROM listings l
-        JOIN property_attributes pa ON l.listing_id = pa.listing_id
-        WHERE pa.bedrooms IS NOT NULL AND pa.bathrooms IS NOT NULL
-        GROUP BY pa.bedrooms, pa.bathrooms
-        ORDER BY pa.bedrooms, pa.bathrooms
-        LIMIT 15
-        """,
-        "chart_type": "bar",
-        "x": "bedrooms",
-        "y": "avg_price",
-        "color": "bathrooms",
-        "title": "Bedrooms & Bathrooms Effect on Pricing"
-    },
-    
-    "Q7: Parking & Power Backup Impact on Price": {
-        "query": """
-        SELECT
-            CASE WHEN pa.parking_available = 1 THEN 'Has Parking' ELSE 'No Parking' END AS parking,
-            CASE WHEN pa.power_backup = 1 THEN 'Has Power Backup' ELSE 'No Power Backup' END AS power,
-            ROUND(AVG(l.price), 2) AS avg_price,
-            COUNT(*) AS count
-        FROM listings l
-        JOIN property_attributes pa ON l.listing_id = pa.listing_id
-        GROUP BY parking, power
-        ORDER BY avg_price DESC
-        """,
-        "chart_type": "bar",
-        "x": "parking",
-        "y": "avg_price",
-        "color": "power",
-        "title": "Parking & Power Backup Impact on Price"
-    },
-    
-    "Q8: Year Built vs Average Listing Price": {
-        "query": """
-        SELECT pa.year_built,
-               ROUND(AVG(l.price), 2) AS avg_price,
-               COUNT(*) AS count
-        FROM listings l
-        JOIN property_attributes pa ON l.listing_id = pa.listing_id
-        WHERE pa.year_built IS NOT NULL
-        GROUP BY pa.year_built
-        ORDER BY pa.year_built DESC
-        LIMIT 20
-        """,
-        "chart_type": "line",
-        "x": "year_built",
-        "y": "avg_price",
-        "title": "Year Built vs Average Listing Price"
-    },
-    
-    "Q9: Cities with Highest Median Property Prices": {
-        "query": """
-        SELECT city,
-               ROUND(AVG(price), 2) AS approx_median_price
-        FROM (
-            SELECT city, price,
-                   ROW_NUMBER() OVER (PARTITION BY city ORDER BY price) AS rn,
-                   COUNT(*) OVER (PARTITION BY city) AS cnt
-            FROM listings
-        )
-        WHERE rn IN ((cnt + 1) / 2, (cnt + 2) / 2)
-        GROUP BY city
-        ORDER BY approx_median_price DESC
-        """,
-        "chart_type": "bar",
-        "x": "city",
-        "y": "approx_median_price",
-        "title": "Cities with Highest Median Property Prices"
-    },
-    
-    "Q10: Properties Distributed Across Price Buckets": {
-        "query": """
-        SELECT
-            CASE
-                WHEN price < 500000   THEN 'Under $500K'
-                WHEN price < 1000000  THEN '$500K - $1M'
-                WHEN price < 2000000  THEN '$1M - $2M'
-                WHEN price < 3000000  THEN '$2M - $3M'
-                WHEN price < 4000000  THEN '$3M - $4M'
-                ELSE 'Over $4M'
-            END AS price_bucket,
-            COUNT(*) AS count,
-            ROUND(AVG(price), 0) AS avg_price_in_bucket
-        FROM listings
-        GROUP BY price_bucket
-        ORDER BY MIN(price)
-        """,
-        "chart_type": "pie",
-        "names": "price_bucket",
-        "values": "count",
-        "title": "Properties Distributed Across Price Buckets"
-    },
-    
-    "Q11: Average Days on Market by City": {
-        "query": """
-        SELECT l.city,
-               ROUND(AVG(s.days_on_market), 1) AS avg_days_on_market,
-               COUNT(*) AS sales_count
-        FROM sales s
-        JOIN listings l ON s.listing_id = l.listing_id
-        GROUP BY l.city
-        ORDER BY avg_days_on_market ASC
-        """,
-        "chart_type": "bar",
-        "x": "city",
-        "y": "avg_days_on_market",
-        "title": "Average Days on Market by City"
-    },
-    
-    "Q12: Fastest Selling Property Types": {
-        "query": """
-        SELECT l.property_type,
-               ROUND(AVG(s.days_on_market), 1) AS avg_days_on_market,
-               COUNT(*) AS sales_count
-        FROM sales s
-        JOIN listings l ON s.listing_id = l.listing_id
-        GROUP BY l.property_type
-        ORDER BY avg_days_on_market ASC
-        """,
-        "chart_type": "bar",
-        "x": "property_type",
-        "y": "avg_days_on_market",
-        "title": "Fastest Selling Property Types"
-    },
-    
-    "Q13: % Properties Sold Above Listing Price": {
-        "query": """
-        SELECT
-            COUNT(*) AS total_sales,
-            SUM(CASE WHEN s.sale_price > l.price THEN 1 ELSE 0 END) AS sold_above_listing,
-            ROUND(100.0 * SUM(CASE WHEN s.sale_price > l.price THEN 1 ELSE 0 END) / COUNT(*), 2) AS pct_above_listing
-        FROM sales s
-        JOIN listings l ON s.listing_id = l.listing_id
-        """,
-        "chart_type": "indicator",
-        "value": "pct_above_listing",
-        "title": "Properties Sold Above Listing Price (%)"
-    },
-    
-    "Q14: Sale-to-List Price Ratio by City": {
-        "query": """
-        SELECT l.city,
-               ROUND(AVG(s.sale_price / NULLIF(l.price, 0)), 4) AS sale_to_list_ratio
-        FROM sales s
-        JOIN listings l ON s.listing_id = l.listing_id
-        GROUP BY l.city
-        ORDER BY sale_to_list_ratio DESC
-        """,
-        "chart_type": "bar",
-        "x": "city",
-        "y": "sale_to_list_ratio",
-        "title": "Sale-to-List Price Ratio by City"
-    },
-    
-    "Q15: Listings That Took 90+ Days to Sell": {
-        "query": """
-        SELECT s.listing_id, l.city, l.property_type,
-               l.price, s.sale_price, s.days_on_market, s.date_sold
-        FROM sales s
-        JOIN listings l ON s.listing_id = l.listing_id
-        WHERE s.days_on_market > 90
-        ORDER BY s.days_on_market DESC
-        LIMIT 10
-        """,
-        "chart_type": "table",
-        "title": "Listings That Took 90+ Days to Sell"
-    },
-    
-    "Q16: Metro Distance vs Time on Market": {
-        "query": """
-        SELECT
-            CASE
-                WHEN pa.metro_distance_km <= 2  THEN '0-2 km'
-                WHEN pa.metro_distance_km <= 5  THEN '2-5 km'
-                WHEN pa.metro_distance_km <= 10 THEN '5-10 km'
-                ELSE '10+ km'
-            END AS metro_range,
-            ROUND(AVG(s.days_on_market), 1) AS avg_days_on_market,
-            COUNT(*) AS count
-        FROM sales s
-        JOIN listings l ON s.listing_id = l.listing_id
-        JOIN property_attributes pa ON l.listing_id = pa.listing_id
-        GROUP BY metro_range
-        ORDER BY avg_days_on_market ASC
-        """,
-        "chart_type": "bar",
-        "x": "metro_range",
-        "y": "avg_days_on_market",
-        "title": "Metro Distance vs Time on Market"
-    },
-    
-    "Q17: Monthly Sales Trend": {
-        "query": """
-        SELECT DATE_FORMAT(date_sold, '%Y-%m') AS month,
-               COUNT(*) AS total_sales,
-               ROUND(SUM(sale_price), 2) AS total_revenue
-        FROM sales
-        WHERE date_sold IS NOT NULL
-        GROUP BY month
-        ORDER BY month
-        """,
-        "chart_type": "line",
-        "x": "month",
-        "y": "total_sales",
-        "title": "Monthly Sales Trend"
-    },
-    
-    "Q18: Currently Unsold Properties": {
-        "query": """
-        SELECT l.listing_id, l.city, l.property_type,
-               l.price, l.sqft, l.date_listed, a.name AS agent_name
-        FROM listings l
-        LEFT JOIN sales s ON l.listing_id = s.listing_id
-        LEFT JOIN agents a ON l.agent_id = a.agent_id
-        WHERE s.listing_id IS NULL
-        ORDER BY l.date_listed ASC
-        LIMIT 20
-        """,
-        "chart_type": "table",
-        "title": "Currently Unsold Properties (First 20)"
-    },
-    
-    "Q19: Top Agents by Sales Closed": {
-        "query": """
-        SELECT a.agent_id, a.name,
-               COUNT(s.listing_id) AS total_sales_closed
-        FROM agents a
-        JOIN listings l ON a.agent_id = l.agent_id
-        JOIN sales s ON l.listing_id = s.listing_id
-        GROUP BY a.agent_id, a.name
-        ORDER BY total_sales_closed DESC
-        LIMIT 10
-        """,
-        "chart_type": "bar",
-        "x": "name",
-        "y": "total_sales_closed",
-        "title": "Top Agents by Sales Closed"
-    },
-    
-    "Q20: Top Agents by Total Sales Revenue": {
-        "query": """
-        SELECT a.name,
-               COUNT(s.listing_id) AS deals,
-               ROUND(SUM(s.sale_price), 2) AS total_revenue
-        FROM agents a
-        JOIN listings l ON a.agent_id = l.agent_id
-        JOIN sales s ON l.listing_id = s.listing_id
-        GROUP BY a.name
-        ORDER BY total_revenue DESC
-        LIMIT 10
-        """,
-        "chart_type": "bar",
-        "x": "name",
-        "y": "total_revenue",
-        "title": "Top Agents by Total Sales Revenue"
-    },
-    
-    "Q21: Agents Who Close Deals Fastest": {
-        "query": """
-        SELECT a.name,
-               ROUND(AVG(s.days_on_market), 1) AS avg_days_to_close,
-               COUNT(*) AS deals_count
-        FROM agents a
-        JOIN listings l ON a.agent_id = l.agent_id
-        JOIN sales s ON l.listing_id = s.listing_id
-        GROUP BY a.name
-        ORDER BY avg_days_to_close ASC
-        LIMIT 10
-        """,
-        "chart_type": "bar",
-        "x": "name",
-        "y": "avg_days_to_close",
-        "title": "Agents Who Close Deals Fastest"
-    },
-    
-    "Q22: Experience vs Deals Closed": {
-        "query": """
-        SELECT name, experience_years, deals_closed, rating, avg_closing_days
-        FROM agents
-        ORDER BY experience_years DESC
-        """,
-        "chart_type": "scatter",
-        "x": "experience_years",
-        "y": "deals_closed",
-        "title": "Experience vs Deals Closed"
-    },
-    
-    "Q23: Rating Band vs Deal Closing Speed": {
-        "query": """
-        SELECT
-            CASE
-                WHEN a.rating >= 4.5 THEN 'Top Rated (4.5+)'
-                WHEN a.rating >= 3.5 THEN 'Good (3.5-4.5)'
-                ELSE 'Average (< 3.5)'
-            END AS rating_band,
-            ROUND(AVG(s.days_on_market), 1) AS avg_days_to_close,
-            COUNT(*) AS deals
-        FROM agents a
-        JOIN listings l ON a.agent_id = l.agent_id
-        JOIN sales s ON l.listing_id = s.listing_id
-        GROUP BY rating_band
-        ORDER BY avg_days_to_close ASC
-        """,
-        "chart_type": "bar",
-        "x": "rating_band",
-        "y": "avg_days_to_close",
-        "title": "Rating Band vs Deal Closing Speed"
-    },
-    
-    "Q24: Commission Earned by Agent": {
-        "query": """
-        SELECT a.name,
-               a.commission_rate,
-               COUNT(s.listing_id) AS deals,
-               ROUND(SUM(s.sale_price * a.commission_rate / 100.0), 2) AS total_commission_earned
-        FROM agents a
-        JOIN listings l ON a.agent_id = l.agent_id
-        JOIN sales s ON l.listing_id = s.listing_id
-        GROUP BY a.name, a.commission_rate
-        ORDER BY total_commission_earned DESC
-        LIMIT 10
-        """,
-        "chart_type": "bar",
-        "x": "name",
-        "y": "total_commission_earned",
-        "title": "Commission Earned by Agent"
-    },
-    
-    "Q25: Investor vs End User Split": {
-        "query": """
-        SELECT buyer_type,
-               COUNT(*) AS count,
-               ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS percentage
-        FROM buyers
-        GROUP BY buyer_type
-        """,
-        "chart_type": "pie",
-        "names": "buyer_type",
-        "values": "percentage",
-        "title": "Investor vs End User Split (%)"
-    },
-    
-    "Q26: Cities with Highest Loan Uptake Rate": {
-        "query": """
-        SELECT l.city,
-               COUNT(b.buyer_id) AS total_buyers,
-               SUM(b.loan_taken) AS loan_buyers,
-               ROUND(100.0 * SUM(b.loan_taken) / COUNT(b.buyer_id), 2) AS loan_rate_pct
-        FROM buyers b
-        JOIN sales s ON b.sale_id = s.listing_id
-        JOIN listings l ON s.listing_id = l.listing_id
-        GROUP BY l.city
-        ORDER BY loan_rate_pct DESC
-        """,
-        "chart_type": "bar",
-        "x": "city",
-        "y": "loan_rate_pct",
-        "title": "Cities with Highest Loan Uptake Rate"
-    },
-    
-    "Q27: Average Loan Amount by Buyer Type": {
-        "query": """
-        SELECT buyer_type,
-               ROUND(AVG(loan_amount), 2) AS avg_loan_amount,
-               COUNT(*) AS loan_count
-        FROM buyers
-        WHERE loan_taken = 1
-        GROUP BY buyer_type
-        """,
-        "chart_type": "bar",
-        "x": "buyer_type",
-        "y": "avg_loan_amount",
-        "title": "Average Loan Amount by Buyer Type"
-    },
-    
-    "Q28: Most Common Payment Modes": {
-        "query": """
-        SELECT payment_mode,
-               COUNT(*) AS count,
-               ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS percentage
-        FROM buyers
-        GROUP BY payment_mode
-        ORDER BY count DESC
-        """,
-        "chart_type": "pie",
-        "names": "payment_mode",
-        "values": "percentage",
-        "title": "Most Common Payment Modes (%)"
-    },
-    
-    "Q29: Loan vs No-Loan Closing Speed": {
-        "query": """
-        SELECT
-            CASE WHEN b.loan_taken = 1 THEN 'Loan Backed' ELSE 'No Loan' END AS purchase_type,
-            ROUND(AVG(s.days_on_market), 1) AS avg_days_on_market,
-            COUNT(*) AS count
-        FROM buyers b
-        JOIN sales s ON b.sale_id = s.listing_id
-        GROUP BY purchase_type
-        """,
-        "chart_type": "bar",
-        "x": "purchase_type",
-        "y": "avg_days_on_market",
-        "title": "Loan vs No-Loan Closing Speed"
-    },
-    
-    "Q30: Top Loan Providers by Volume": {
-        "query": """
-        SELECT loan_provider,
-               COUNT(*) AS num_loans,
-               ROUND(AVG(loan_amount), 2) AS avg_loan_amount,
-               ROUND(SUM(loan_amount), 2) AS total_loans_disbursed
-        FROM buyers
-        WHERE loan_taken = 1
-          AND loan_provider IS NOT NULL
-          AND loan_provider != ''
-        GROUP BY loan_provider
-        ORDER BY num_loans DESC
-        """,
-        "chart_type": "bar",
-        "x": "loan_provider",
-        "y": "num_loans",
-        "title": "Top Loan Providers by Volume"
-    }
-}
+# Extract queries from notebook
+def get_queries_from_notebook():
+    """Extract SQL queries from the notebook"""
+    try:
+        with open('apps.ipynb', 'r', encoding='utf-8') as f:
+            notebook = json.load(f)
+        
+        queries = {}
+        
+        # Define query cells with their titles and chart types
+        query_configs = {
+            "Q1: Average Listing Price by City": {
+                "cell_index": 22,
+                "chart_type": "bar",
+                "x": "city",
+                "y": "avg_price",
+                "title": "Average Listing Price by City"
+            },
+            "Q2: Average Price per Sq Ft by Property Type": {
+                "cell_index": 24,
+                "chart_type": "bar",
+                "x": "property_type",
+                "y": "avg_price_per_sqft",
+                "title": "Average Price per Square Foot by Property Type"
+            },
+            "Q3: Furnishing Status Impact on Price": {
+                "cell_index": 26,
+                "chart_type": "bar",
+                "x": "furnishing_status",
+                "y": "avg_price",
+                "title": "Furnishing Status Impact on Price"
+            },
+            "Q4: Metro Distance vs Average Price": {
+                "cell_index": 28,
+                "chart_type": "bar",
+                "x": "metro_category",
+                "y": "avg_price",
+                "title": "Metro Distance vs Average Price"
+            },
+            "Q5: Rented vs Non-Rented Property Prices": {
+                "cell_index": 30,
+                "chart_type": "bar",
+                "x": "rental_status",
+                "y": "avg_price",
+                "title": "Rented vs Non-Rented Property Prices"
+            },
+            "Q6: Bedrooms & Bathrooms Effect on Pricing": {
+                "cell_index": 32,
+                "chart_type": "bar",
+                "x": "bedrooms",
+                "y": "avg_price",
+                "color": "bathrooms",
+                "title": "Bedrooms & Bathrooms Effect on Pricing"
+            },
+            "Q7: Parking & Power Backup Impact on Price": {
+                "cell_index": 34,
+                "chart_type": "bar",
+                "x": "parking",
+                "y": "avg_price",
+                "color": "power_backup",
+                "title": "Parking & Power Backup Impact on Price"
+            },
+            "Q8: Year Built vs Average Listing Price": {
+                "cell_index": 36,
+                "chart_type": "line",
+                "x": "year_built",
+                "y": "avg_price",
+                "title": "Year Built vs Average Listing Price"
+            },
+            "Q9: Cities with Highest Median Property Prices": {
+                "cell_index": 38,
+                "chart_type": "bar",
+                "x": "city",
+                "y": "avg_price",
+                "title": "Cities with Highest Median Property Prices"
+            },
+            "Q10: Properties Distributed Across Price Buckets": {
+                "cell_index": 40,
+                "chart_type": "pie",
+                "names": "price_bucket",
+                "values": "property_count",
+                "title": "Properties Distributed Across Price Buckets"
+            },
+            "Q11: Average Days on Market by City": {
+                "cell_index": 42,
+                "chart_type": "bar",
+                "x": "city",
+                "y": "avg_days_on_market",
+                "title": "Average Days on Market by City"
+            },
+            "Q12: Fastest Selling Property Types": {
+                "cell_index": 44,
+                "chart_type": "bar",
+                "x": "property_type",
+                "y": "avg_days_on_market",
+                "title": "Fastest Selling Property Types"
+            },
+            "Q13: % Properties Sold Above Listing Price": {
+                "cell_index": 46,
+                "chart_type": "indicator",
+                "value": "percent_above_listing",
+                "title": "Properties Sold Above Listing Price (%)"
+            },
+            "Q14: Sale-to-List Price Ratio by City": {
+                "cell_index": 48,
+                "chart_type": "bar",
+                "x": "city",
+                "y": "sale_to_list_ratio",
+                "title": "Sale-to-List Price Ratio by City"
+            },
+            "Q15: Listings That Took 90+ Days to Sell": {
+                "cell_index": 50,
+                "chart_type": "table",
+                "title": "Listings That Took 90+ Days to Sell"
+            },
+            "Q16: Metro Distance vs Time on Market": {
+                "cell_index": 52,
+                "chart_type": "bar",
+                "x": "metro_category",
+                "y": "avg_days_on_market",
+                "title": "Metro Distance vs Time on Market"
+            },
+            "Q17: Monthly Sales Trend": {
+                "cell_index": 54,
+                "chart_type": "line",
+                "x": "month",
+                "y": "total_sales",
+                "title": "Monthly Sales Trend"
+            },
+            "Q18: Currently Unsold Properties": {
+                "cell_index": 56,
+                "chart_type": "table",
+                "title": "Currently Unsold Properties (First 20)"
+            },
+            "Q19: Top Agents by Sales Closed": {
+                "cell_index": 58,
+                "chart_type": "bar",
+                "x": "name",
+                "y": "total_sales",
+                "title": "Top Agents by Sales Closed"
+            },
+            "Q20: Top Agents by Total Sales Revenue": {
+                "cell_index": 60,
+                "chart_type": "bar",
+                "x": "name",
+                "y": "total_revenue",
+                "title": "Top Agents by Total Sales Revenue"
+            },
+            "Q21: Agents Who Close Deals Fastest": {
+                "cell_index": 62,
+                "chart_type": "bar",
+                "x": "name",
+                "y": "avg_days_to_close",
+                "title": "Agents Who Close Deals Fastest"
+            },
+            "Q22: Experience vs Deals Closed": {
+                "cell_index": 64,
+                "chart_type": "scatter",
+                "x": "experience_years",
+                "y": "total_sales",
+                "title": "Experience vs Deals Closed"
+            },
+            "Q23: Rating Band vs Deal Closing Speed": {
+                "cell_index": 66,
+                "chart_type": "bar",
+                "x": "rating",
+                "y": "avg_days_to_close",
+                "title": "Rating Band vs Deal Closing Speed"
+            },
+            "Q24: Commission Earned by Agent": {
+                "cell_index": 68,
+                "chart_type": "bar",
+                "x": "name",
+                "y": "avg_commission",
+                "title": "Commission Earned by Agent"
+            },
+            "Q25: Investor vs End User Split": {
+                "cell_index": 72,
+                "chart_type": "pie",
+                "names": "buyer_type",
+                "values": "percentage",
+                "title": "Investor vs End User Split (%)"
+            },
+            "Q26: Cities with Highest Loan Uptake Rate": {
+                "cell_index": 74,
+                "chart_type": "bar",
+                "x": "city",
+                "y": "loan_uptake_rate",
+                "title": "Cities with Highest Loan Uptake Rate"
+            },
+            "Q27: Average Loan Amount by Buyer Type": {
+                "cell_index": 76,
+                "chart_type": "bar",
+                "x": "buyer_type",
+                "y": "avg_loan_amount",
+                "title": "Average Loan Amount by Buyer Type"
+            },
+            "Q28: Most Common Payment Modes": {
+                "cell_index": 78,
+                "chart_type": "pie",
+                "names": "payment_mode",
+                "values": "percentage",
+                "title": "Most Common Payment Modes (%)"
+            },
+            "Q29: Loan vs No-Loan Closing Speed": {
+                "cell_index": 80,
+                "chart_type": "bar",
+                "x": "loan_status",
+                "y": "avg_days_to_close",
+                "title": "Loan vs No-Loan Closing Speed"
+            }
+        }
+        
+        for query_name, config in query_configs.items():
+            cell = notebook['cells'][config['cell_index']]
+            if cell['cell_type'] == 'code':
+                # Extract the SQL query from the cell source
+                source = ''.join(cell['source'])
+                # Find the query between triple quotes
+                start = source.find('"""')
+                if start != -1:
+                    end = source.find('"""', start + 3)
+                    if end != -1:
+                        query = source[start + 3:end]
+                        queries[query_name] = {
+                            "query": query.strip(),
+                            "chart_type": config["chart_type"],
+                            "title": config["title"]
+                        }
+                        # Add chart-specific parameters
+                        for param in ["x", "y", "names", "values", "color", "value"]:
+                            if param in config:
+                                queries[query_name][param] = config[param]
+        
+        return queries
+    except Exception as e:
+        st.error(f"Error loading queries from notebook: {e}")
+        return {}
 
 # Create Chart Function
 def create_chart(df, chart_config):
@@ -741,18 +463,25 @@ def main():
     st.header("🔍 Business Intelligence Queries")
     st.markdown("Select any of the 30 predefined queries to analyze specific aspects of the real estate data:")
     
+    # Load queries from notebook
+    queries = get_queries_from_notebook()
+    
+    if not queries:
+        st.error("Could not load queries from notebook. Please ensure apps.ipynb is available.")
+        return
+    
     # Query selection
     selected_query = st.selectbox(
         "Choose a query to execute:",
-        options=list(QUERIES.keys()),
+        options=list(queries.keys()),
         index=0
     )
     
     if selected_query:
-        query_config = QUERIES[selected_query]
+        query_config = queries[selected_query]
         
         # Execute query button
-        if st.button(f"Execute"):
+        if st.button(f"Execute: {selected_query}"):
             with st.spinner("Executing query..."):
                 result_df = run_query(query_config["query"], engine)
                 

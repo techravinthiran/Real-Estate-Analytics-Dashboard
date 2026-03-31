@@ -29,11 +29,11 @@ st.markdown("""
 
 @st.cache_resource
 def init_db():
-    listings   = pd.DataFrame(json.load(open("listings_final_expanded.json")))
-    attrs      = pd.DataFrame(json.load(open("property_attributes_final_expanded.json")))
-    agents     = pd.DataFrame(json.load(open("agents_cleaned.json")))
-    buyers     = pd.DataFrame(json.load(open("buyers_cleaned.json")))
-    sales      = pd.read_csv("sales_cleaned.csv")
+    listings   = pd.DataFrame(json.load(open("dataset/listings_final_expanded.json")))
+    attrs      = pd.DataFrame(json.load(open("dataset/property_attributes_final_expanded.json")))
+    agents     = pd.DataFrame(json.load(open("dataset/agents_cleaned.json")))
+    buyers     = pd.DataFrame(json.load(open("dataset/buyers_cleaned.json")))
+    sales      = pd.read_csv("dataset/sales_cleaned.csv")
 
     # Normalise column names
     attrs.columns   = [c.lower() for c in attrs.columns]
@@ -62,7 +62,7 @@ st.sidebar.markdown("Real Estate Analytics Platform")
 st.sidebar.markdown("---")
 page = st.sidebar.radio(
     "Navigate",
-    ["📊 Dashboard", "🔍 Filters & Listings", "📈 SQL Insights (30 Queries)", "✏️ CRUD Operations"],
+    ["📊 Dashboard", "🔍 Filters & Listings", "📈 SQL Insights (30 Queries)"],
 )
 
 # Global sidebar filters (used by Dashboard & Filters pages)
@@ -573,9 +573,6 @@ LIMIT 10;
     selected_q  = st.selectbox("Choose a Question", query_names)
     sql, chart_type, x_col, y_col = QUERIES[selected_q]
 
-    with st.expander("📋 View SQL Query", expanded=True):
-        st.code(sql.strip(), language="sql")
-
     try:
         result = q(sql)
         st.markdown(f"**Result: {len(result):,} rows**")
@@ -602,71 +599,4 @@ LIMIT 10;
 
     except Exception as e:
         st.error(f"Query error: {e}")
-
-# CRUD Operations
-elif page == "✏️ CRUD Operations":
-    st.markdown('<p class="main-title">✏️ CRUD Operations</p>', unsafe_allow_html=True)
-
-    table_choice = st.selectbox("Select Table", ["listings","agents","sales","buyers","property_attributes"])
-
-    # Read
-    st.markdown('<p class="section-header">📖 View Records</p>', unsafe_allow_html=True)
-    limit = st.slider("Rows to display", 5, 100, 20)
-    df_table = q(f"SELECT * FROM {table_choice} LIMIT {limit}")
-    st.dataframe(df_table, use_container_width=True)
-
-    st.markdown("---")
-
-    tab_add, tab_upd, tab_del = st.tabs(["➕ Add Record", "✏️ Update Record", "🗑️ Delete Record"])
-
-    # Add
-    with tab_add:
-        st.markdown(f"**Add a new row to `{table_choice}`**")
-        cols = q(f"SELECT * FROM {table_choice} LIMIT 0").columns.tolist()
-        new_vals = {}
-        col_pairs = st.columns(2)
-        for i, col in enumerate(cols):
-            new_vals[col] = col_pairs[i % 2].text_input(col, key=f"add_{col}")
-
-        if st.button("Insert Row"):
-            placeholders = ", ".join(["?" for _ in cols])
-            col_str = ", ".join(cols)
-            vals = [new_vals[c] for c in cols]
-            try:
-                con.execute(f"INSERT INTO {table_choice} ({col_str}) VALUES ({placeholders})", vals)
-                con.commit()
-                st.success("✅ Row inserted successfully!")
-            except Exception as e:
-                st.error(f"Error: {e}")
-
-    # Update
-    with tab_upd:
-        st.markdown(f"**Update a row in `{table_choice}`**")
-        pk_col = st.text_input("Primary Key Column (e.g. listing_id)", key="upd_pk")
-        pk_val = st.text_input("Primary Key Value", key="upd_pk_val")
-        upd_col = st.text_input("Column to Update", key="upd_col")
-        upd_val = st.text_input("New Value", key="upd_val")
-
-        if st.button("Update Row"):
-            try:
-                con.execute(f"UPDATE {table_choice} SET {upd_col} = ? WHERE {pk_col} = ?",
-                            [upd_val, pk_val])
-                con.commit()
-                st.success("✅ Row updated successfully!")
-            except Exception as e:
-                st.error(f"Error: {e}")
-
-    # Delete
-    with tab_del:
-        st.markdown(f"**Delete a row from `{table_choice}`**")
-        del_pk_col = st.text_input("Primary Key Column", key="del_pk_col")
-        del_pk_val = st.text_input("Primary Key Value to Delete", key="del_pk_val")
-
-        if st.button("🗑️ Delete Row", type="primary"):
-            try:
-                con.execute(f"DELETE FROM {table_choice} WHERE {del_pk_col} = ?", [del_pk_val])
-                con.commit()
-                st.success("✅ Row deleted!")
-            except Exception as e:
-                st.error(f"Error: {e}")
 
